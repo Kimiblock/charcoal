@@ -6,6 +6,7 @@ import (
 	"net"
 	//"os"
 	"strings"
+	"strconv"
 
 	"golang.org/x/sys/unix"
 
@@ -30,7 +31,7 @@ var (
 	Custom IPs not supported yet.
 */
 type appOutPerms struct {
-	allowIP			[]string
+	//allowIP			[]string
 	denyIP			[]string
 	appID			[]string
 	appGPath		string
@@ -55,7 +56,7 @@ func buildNftFile (
 	}
 	v4DenyList := []string{}
 	v6DenyList := []string{}
-	for idx, val := range outperm.denyIP {
+	for _, val := range outperm.denyIP {
 		switch val {
 			case "private":
 				v4DenyList = append(
@@ -83,6 +84,23 @@ func buildNftFile (
 							v4DenyList = append(v4DenyList, string(ipRes.To4()))
 							continue
 					}
+				} else {
+					addrs := net.LookupHost(val)
+					for _, addr := range addrs {
+						tryResV4 := net.ParseIP(addr)
+						switch tryResV4 {
+							case nil:
+								v6DenyList = append(
+									v6DenyList,
+									string(tryResV4),
+								)
+							default:
+								v4DenyList = append(
+									v4DenyList,
+									string(tryResV4.To4()),
+								)
+						}
+					}
 				}
 		}
 	}
@@ -93,20 +111,21 @@ func buildNftFile (
 	builder.WriteString("table inet " + tableName + " {\n")
 
 	builder.WriteString("chain charcoal {\n")
-		builder.WriteString("type filter hook output priority filter; policy accept; {\n")
-			builder.WriteString(
-				"socket cgroupv2 level 6 " + outperm.appGPath + "tcp dport 53 accept",
-			)
-			builder.WriteString(
-				"socket cgroupv2 level 6 " + outperm.appGPath + "udp dport 53 accept",
-			)
-			builder.WriteString(
-				"socket cgroupv2 level 6 " + outperm.appGPath + " ip daddr @v4reject drop\n",
-			)
-			builder.WriteString(
-				"socket cgroupv2 level 6 " + outperm.appGPath + " ip daddr @v6reject drop \n",
-			)
-		builder.WriteString("}\n")
+		builder.WriteString("type filter hook output priority filter;\n")
+		builder.WriteString("policy accept;\n")
+		builder.WriteString(
+			"socket cgroupv2 level 6 " + strconv.Quote(outperm.appGPath) + " tcp dport 53 accept\n",
+		)
+		builder.WriteString(
+			"socket cgroupv2 level 6 " + strconv.Quote(outperm.appGPath) + " udp dport 53 accept\n",
+		)
+		builder.WriteString(
+			"socket cgroupv2 level 6 " + strconv.Quote(outperm.appGPath) + " ip daddr @v4reject drop\n",
+		)
+		builder.WriteString(
+			"socket cgroupv2 level 6 " + strconv.Quote(outperm.appGPath) + " ip6 daddr @v6reject drop\n",
+		)
+
 	builder.WriteString("}\n")
 
 
