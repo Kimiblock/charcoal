@@ -47,6 +47,12 @@ type ResponseSignal struct {
 	Log			string
 }
 
+// Incoming signal for socket
+type incomingSig struct {
+	CgroupNested		string
+	RawDenyList		string
+}
+
 type peerCreds struct {
 	UID			uint
 	GID			uint
@@ -254,6 +260,13 @@ func sendResponse (writer http.ResponseWriter, response ResponseSignal) {
 	writer.Write(jsonObj)
 }
 
+func addReqHandler (writer http.ResponseWriter, request *http.Request) {
+	defer request.Body.Close()
+	cred := request.Context().Value(peerCreds{}).(peerCreds)
+	uid := cred.UID
+	echo("debug", "Got an add request from user " + strconv.Itoa(int(uid)))
+}
+
 func unknownReqHandler (writer http.ResponseWriter, request *http.Request) {
 	defer request.Body.Close()
 	var resp ResponseSignal
@@ -295,6 +308,7 @@ func signalListener (listener net.Listener) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", unknownReqHandler)
+	mux.HandleFunc("/add", addReqHandler)
 
 	server := http.Server{
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
