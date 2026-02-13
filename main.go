@@ -38,7 +38,7 @@ var (
 type appOutPerms struct {
 	//allowIP			[]string
 	denyIP			[]string
-	appID			[]string
+	appID			string
 	appGPath		string
 }
 
@@ -48,9 +48,11 @@ type ResponseSignal struct {
 }
 
 // Incoming signal for socket
-type incomingSig struct {
+type IncomingSig struct {
 	CgroupNested		string
-	RawDenyList		string
+	RawDenyList		[]string
+	SandboxEng		string
+	AppID			string
 }
 
 type peerCreds struct {
@@ -262,9 +264,33 @@ func sendResponse (writer http.ResponseWriter, response ResponseSignal) {
 
 func addReqHandler (writer http.ResponseWriter, request *http.Request) {
 	defer request.Body.Close()
+	var resp ResponseSignal
 	cred := request.Context().Value(peerCreds{}).(peerCreds)
 	uid := cred.UID
 	echo("debug", "Got an add request from user " + strconv.Itoa(int(uid)))
+
+	var requestJson IncomingSig
+	rawReq, err := io.ReadAll(request.Body)
+	if err != nil {
+		echo("warn", "Could not read request: " + err.Error())
+		resp.Log = "Could not read request: " + err.Error()
+		sendResponse(writer, resp)
+		return
+	}
+
+	err = json.Unmarshal(rawReq, &requestJson)
+	if err != nil {
+		echo("warn", "Could not read request: " + err.Error())
+		resp.Log = "Could not read request: " + err.Error()
+		sendResponse(writer, resp)
+		return
+	}
+
+	var info appOutPerms
+	info.denyIP = requestJson.RawDenyList
+	info.appID = requestJson.AppID
+
+	// TODO: generate cgroup path, and add rules
 }
 
 func unknownReqHandler (writer http.ResponseWriter, request *http.Request) {
