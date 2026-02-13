@@ -162,7 +162,7 @@ func buildNftFile (
 	builder.WriteString("}\n")
 
 
-	builder.WriteString("\n}")
+	builder.WriteString("}\n")
 
 	return builder.String()
 }
