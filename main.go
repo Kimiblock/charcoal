@@ -2,21 +2,23 @@ package main
 
 import (
 	//"fmt"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
+	//"path"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"encoding/json"
-	"golang.org/x/sys/unix"
-
-	"os/signal"
 	"syscall"
+	"context"
 	"github.com/Kimiblock/pecho"
 	"github.com/google/nftables"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -43,6 +45,12 @@ type appOutPerms struct {
 type sigResponse struct {
 	success			bool
 	log			string
+}
+
+type peerCreds struct {
+	UID			uint
+	GID			uint
+	PID			uint
 }
 
 func echo(lvl string, msg string) {
@@ -249,23 +257,90 @@ func unknownReqHandler (writer http.ResponseWriter, request *http.Request) {
 	var resp sigResponse
 	resp.success = false
 	resp.log = "Unknown operation"
+	cred := request.Context().Value(peerCreds{}).(peerCreds)
+	uid := cred.UID
+	echo("warn", "Got an unknown request from UID: " + strconv.Itoa(int(uid)))
+
 	sendResponse(writer, resp)
 }
 
-func shutdownWorker (shutdownChan chan os.Signal, listener net.Listener) {
+func shutdownWorker (shutdownChan chan os.Signal, listener net.Listener, block chan int) {
 	sig := <- shutdownChan
 	echo("info", "Shutting down charcoal on signal " + sig.String())
 	connNft.CloseLasting()
 	if listener != nil {
 		listener.Close()
 	}
+	close(block)
 	close(logChan)
+}
+
+func signalListener (listener net.Listener) {
+	runtimeDir := os.Getenv("RUNTIME_DIRECTORY")
+	if len(runtimeDir) == 0 {
+		echo("debug", "Could not read RUNTIME_DIRECTORY from environment")
+		runtimeDir = "/run/charcoal"
+	}
+
+	if runtimeDir != "/run/charcoal" {
+		echo("warn", "You have changed the runtime directory. Downstream apps may not support this.")
+	}
+	listener, err = net.Listen("unix", filepath.Join(runtimeDir, "control.sock"))
+	if err != nil {
+		log.Fatalln("Could not listen UNIX socket: " + err.Error())
+		return
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", unknownReqHandler)
+
+	server := http.Server{
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			unixconn, ok := c.(*net.UnixConn)
+			if !ok {
+				echo("warn", "Could not get credentials: connection error")
+				return ctx
+			}
+			raw, err := unixconn.SyscallConn()
+			if err != nil {
+				echo("warn", "Could not get credentials: " + err.Error())
+			}
+
+			var creds *syscall.Ucred
+			raw.Control(func(fd uintptr) {
+				creds, err = syscall.GetsockoptUcred(
+					int(fd),
+					syscall.SOL_SOCKET,
+					syscall.SO_PEERCRED,
+				)
+				if err != nil {
+					echo("warn", "Getsockopt failed: " + err.Error())
+				}
+			})
+			if ctx == nil {
+				return ctx
+			}
+			peerCred := peerCreds {
+				UID:	uint(creds.Uid),
+				GID:	uint(creds.Gid),
+				PID:	uint(creds.Pid),
+			}
+			return context.WithValue(ctx, peerCreds{}, peerCred)
+		},
+		Handler: mux,
+	}
+
+
+	http.HandleFunc("/", unknownReqHandler)
+	server.Serve(listener)
 }
 
 func main() {
 	var unixListener net.Listener
 	sigChan := make(chan os.Signal, 1)
-	go shutdownWorker(sigChan, unixListener)
+	blockerChan := make(chan int, 1)
+	go shutdownWorker(sigChan, unixListener, blockerChan)
+	go signalListener(unixListener)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 	go pecho.StartDaemon(logChan)
 	log.Println("Starting charcoal", version, ", establishing connection to nftables")
@@ -273,6 +348,9 @@ func main() {
 	if err != nil {
 		log.Fatalln("Could not establish connection to nftables: " + err.Error())
 	}
-	log.Println("Established connection")
+	echo("debug", "Established connection to nftables netlink socket")
+
+
+	<- blockerChan
 
 }
