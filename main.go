@@ -10,8 +10,6 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"net"
-
 	"github.com/Kimiblock/pecho"
 	"github.com/google/nftables"
 )
