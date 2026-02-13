@@ -3,13 +3,16 @@ package main
 import (
 	//"fmt"
 	"log"
+	"net"
 	//"os"
+	"strings"
+
 	"golang.org/x/sys/unix"
-	//"strings"
+
 	"net"
 
-	"github.com/google/nftables"
 	"github.com/Kimiblock/pecho"
+	"github.com/google/nftables"
 )
 
 const (
@@ -27,12 +30,70 @@ var (
 	Custom IPs not supported yet.
 */
 type appOutPerms struct {
-	allowIP		[]string
-	denyIP		[]string
+	allowIP			[]string
+	denyIP			[]string
 }
 
 func echo(lvl string, msg string) {
 	logChan <- []string{lvl, msg}
+}
+
+/*
+	This builds a nft file, caller should close channel to indicate done
+*/
+func buildNftFile (
+	nftchan chan string,
+	builder strings.Builder,
+	tableName string,
+	outperm appOutPerms,
+) string {
+	v4DenyList := []string{}
+	v6DenyList := []string{}
+	for idx, val := range outperm.denyIP {
+		switch val {
+			case "private":
+				v4DenyList = append(
+					v4DenyList,
+					"10.0.0.0/8",
+					"172.16.0.0/12",
+					"192.168.0.0/16",
+				)
+				v6DenyList = append(
+					v6DenyList,
+					"fd00::/8",
+				)
+			default:
+				echo("debug", "Trying to resolve: " + val)
+				ipRes := net.ParseIP(val)
+				if ipRes != nil {
+					tryResv4 := ipRes.To4()
+					switch tryResv4 {
+						case nil:
+							echo("debug", "Resolved " + val + " as IPv6")
+							v6DenyList = append(v6DenyList, string(ipRes))
+						default:
+							echo("debug", "Resolved " + val + " as IPv4")
+							v4DenyList = append(v4DenyList, string(ipRes.To4()))
+					}
+
+				}
+		}
+	}
+
+
+
+
+	builder.WriteString("table inet " + tableName + " {\n")
+
+	builder.WriteString("chain charcoal {\n")
+		builder.WriteString("type filter hook output priority filter; policy accept; {\n")
+			builder.WriteString("tcp dport 53 accept")
+			builder.WriteString("udp dport 53 accept")
+		builder.WriteString("}\n")
+	builder.WriteString("}\n")
+
+
+	builder.WriteString("\n}")
 }
 
 /* Returns whether the operation is success or not */
@@ -58,6 +119,12 @@ func setAppPerms(appCgroup string, outperm appOutPerms, appID string, sandboxEng
 		log.Println("Deleted previous table")
 	}
 
+	builder := strings.Builder{}
+
+	nftChan := make(chan nftType, 10)
+	nftFile := buildNftFile(nftChan, builder, sandboxEng + "-" + appID)
+
+	nftChan <-
 
 
 	return true
