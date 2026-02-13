@@ -2,9 +2,13 @@ package main
 
 import (
 	//"fmt"
-	"github.com/google/nftables"
 	"log"
-	"os"
+	//"os"
+	"golang.org/x/sys/unix"
+	//"strings"
+
+	"github.com/google/nftables"
+	"github.com/Kimiblock/pecho"
 )
 
 const (
@@ -14,9 +18,66 @@ const (
 var (
 	connNft		*nftables.Conn
 	err		error
+	logChan		= pecho.MkChannel()
 )
 
+/* Special strings may be interpreted
+	localhost	127.0.0.0/8 ::1/128
+	link-local	169.254.0.0/16 fe80::/64
+	private		10.0.0.0 - 10.255.255.255, 172.16.0.0 - 172.31.255.255, 192.168.0.0 - 192.168.255.255 and fd00::/8
+
+*/
+type appOutPerms struct {
+	allowIP		[]string
+	denyIP		[]string
+}
+
+/* Returns whether the operation is success or not */
+func setAppPerms(appCgroup string, outperm appOutPerms, appID string, sandboxEng string) bool {
+	logChan <- []string{
+		"debug",
+		"Got firewall rules for " + appID + " from " + sandboxEng,
+	}
+	var table = nftables.Table {
+		Name:	sandboxEng + "-" + appID,
+		Family:	unix.NFPROTO_INET,
+	}
+	tableExt, errList := connNft.ListTableOfFamily(
+		sandboxEng + "-" + appID,
+		unix.NFPROTO_INET,
+	)
+	if errList != nil {
+		log.Println("Error listing table: " + errList.Error() + ", treating as non-existent")
+	} else if tableExt == nil {
+		log.Println("Got nil from ListTable")
+	} else {
+		connNft.DelTable(&table)
+		log.Println("Deleted previous table")
+	}
+
+
+	tableRet := connNft.AddTable(&table)
+
+	dropPolicy := nftables.ChainPolicyDrop
+
+	// Build drop policy first
+	var chain = nftables.Chain {
+		Name:		"Denylist",
+		Table:		tableRet,
+		Hooknum:	nftables.ChainHookOutput,
+		Priority:	nftables.ChainPrioritySecurity,
+		Type:		nftables.ChainTypeFilter,
+		Policy:		&dropPolicy,
+	}
+
+	// Here comes the rules
+	//for
+
+	return true
+}
+
 func main() {
+	go pecho.StartDaemon(logChan)
 	log.Println("Starting charcoal", version, ", establishing connection to nftables")
 	connNft, err = nftables.New()
 	if err != nil {
