@@ -252,15 +252,20 @@ func unknownReqHandler (writer http.ResponseWriter, request *http.Request) {
 	sendResponse(writer, resp)
 }
 
-func shutdownWorker (shutdownChan chan os.Signal) {
+func shutdownWorker (shutdownChan chan os.Signal, listener net.Listener) {
 	sig := <- shutdownChan
 	echo("info", "Shutting down charcoal on signal " + sig.String())
 	connNft.CloseLasting()
+	if listener != nil {
+		listener.Close()
+	}
+	close(logChan)
 }
 
 func main() {
+	var unixListener net.Listener
 	sigChan := make(chan os.Signal, 1)
-	go shutdownWorker(sigChan)
+	go shutdownWorker(sigChan, unixListener)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 	go pecho.StartDaemon(logChan)
 	log.Println("Starting charcoal", version, ", establishing connection to nftables")
