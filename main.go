@@ -290,6 +290,18 @@ func addReqHandler (writer http.ResponseWriter, request *http.Request) {
 	info.denyIP = requestJson.RawDenyList
 	info.appID = requestJson.AppID
 
+	pathTemp := []string{
+		"/user.slice/user-1011.slice/user@1011.service/",
+		requestJson.CgroupNested,
+	}
+
+	pathG := strings.Join(
+		pathTemp,
+		"",
+	)
+
+	info.appGPath = strings.ReplaceAll(pathG, "//", "/")
+
 	// TODO: generate cgroup path, and add rules
 }
 
