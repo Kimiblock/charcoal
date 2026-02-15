@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"time"
+	"sync"
 
 	//"path"
 	"context"
@@ -92,6 +93,7 @@ func buildNftFile (
 	tableName string,
 	outperm appOutPerms,
 ) string {
+	var wg sync.WaitGroup
 	builder := strings.Builder{}
 	if len(outperm.appID) == 0 {
 		echo("warn", "This appID is invalid")
@@ -99,19 +101,23 @@ func buildNftFile (
 	}
 	v4DenyList := []string{}
 	v6DenyList := []string{}
+
+	v4Chan := make(chan string, 128)
+	v6Chan := make(chan string, 128)
+
+	var hasPrivate bool
+
 	for _, val := range outperm.denyIP {
+		wg.Go(func() {
 		switch val {
 			case "private":
-				v4DenyList = append(
-					v4DenyList,
-					"10.0.0.0/8",
-					"172.16.0.0/12",
-					"192.168.0.0/16",
-				)
-				v6DenyList = append(
-					v6DenyList,
-					"fd00::/8",
-				)
+				if hasPrivate == true {
+					return
+				}
+				v4Chan <- "10.0.0.0/8"
+				v4Chan <- "172.16.0.0/12"
+				v4Chan <- "192.168.0.0/16"
+				v6Chan <- "fd00::/8"
 			default:
 				echo("debug", "Trying to resolve: " + val)
 				ipRes := net.ParseIP(val)
@@ -120,12 +126,12 @@ func buildNftFile (
 					switch tryResv4 {
 						case nil:
 							echo("debug", "Resolved " + val + " as IPv6")
-							v6DenyList = append(v6DenyList, ipRes.String())
-							continue
+							v6Chan <- ipRes.String()
+							return
 						default:
 							echo("debug", "Resolved " + val + " as IPv4")
-							v4DenyList = append(v4DenyList, ipRes.To4().String())
-							continue
+							v4Chan <- ipRes.To4().String()
+							return
 					}
 				} else {
 					addrs, err := net.LookupHost(val)
@@ -134,7 +140,7 @@ func buildNftFile (
 						"warn",
 						"Could not resolve host " + val + ": " + err.Error(),
 						)
-						continue
+						return
 					}
 					for _, addr := range addrs {
 						tryRes := net.ParseIP(addr)
@@ -144,23 +150,30 @@ func buildNftFile (
 						tryResV4 := tryRes.To4()
 						switch tryResV4 {
 							case nil:
-								v6DenyList = append(
-									v6DenyList,
-									tryRes.String(),
-								)
+								v6Chan <- tryRes.String()
 							default:
-								v4DenyList = append(
-									v4DenyList,
-									tryResV4.To4().String(),
-								)
+								v4Chan <- tryResV4.To4().String()
 						}
 					}
 				}
 		}
+		})
 	}
 
 
+	go func() {
+		wg.Wait()
+		close(v4Chan)
+		close(v6Chan)
+	} ()
 
+	for list := range v4Chan {
+		v4DenyList = append(v4DenyList, list)
+	}
+
+	for list := range v6Chan {
+		v6DenyList = append(v6DenyList, list)
+	}
 
 
 
