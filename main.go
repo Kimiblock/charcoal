@@ -2,8 +2,8 @@ package main
 
 import (
 	//"fmt"
-	"encoding/json"
 	"bufio"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -11,14 +11,17 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"time"
+
 	//"path"
+	"context"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
-	"context"
+
 	"github.com/Kimiblock/pecho"
-	"github.com/google/nftables"
+
 	//"golang.org/x/sys/unix"
 	"github.com/coreos/go-systemd/v22/daemon"
 )
@@ -28,7 +31,6 @@ const (
 )
 
 var (
-	connNft		*nftables.Conn
 	logChan		= pecho.MkChannel()
 	notifyChan 	= make(chan bool, 128)
 )
@@ -262,6 +264,26 @@ func setAppPerms(outperm appOutPerms, sandboxEng string) bool {
 	}
 
 	echo("debug", "Got generated rule: " + nftFile)
+	echo("debug", "Waiting for control group to appear")
+	var sleepCounter int
+	for {
+
+		_, err := os.Stat(filepath.Join("/sys/fs/cgroup", outperm.appGPath))
+		if err == nil {
+			echo("debug", "Control group exists")
+			break
+		}
+		if os.IsNotExist(err) {
+			time.Sleep(10 * time.Millisecond)
+			sleepCounter++
+		} else {
+			echo("warn", "Could not stat control group path: " + err.Error())
+		}
+		if sleepCounter > 1000 {
+			echo("warn", "Timed out waiting for control group")
+			return false
+		}
+	}
 
 
 	cmd = exec.Command("nft", "-c", "-f", "-")
@@ -283,6 +305,8 @@ func setAppPerms(outperm appOutPerms, sandboxEng string) bool {
 	if err != nil {
 		echo("warn", "nft failed to test rules: " + err.Error())
 		return false
+	} else {
+		echo("debug", "Rules test success")
 	}
 
 
@@ -402,12 +426,11 @@ func unknownReqHandler (writer http.ResponseWriter, request *http.Request) {
 func shutdownWorker (shutdownChan chan os.Signal, listener net.Listener, block chan int) {
 	sig := <- shutdownChan
 	echo("info", "Shutting down netsock on signal " + sig.String())
-	connNft.CloseLasting()
 	if listener != nil {
 		listener.Close()
 	}
-	close(block)
-	close(logChan)
+	block <- 1
+	//close(logChan)
 }
 
 func signalListener (listener net.Listener) {
