@@ -3,6 +3,7 @@ package main
 import (
 	//"fmt"
 	"encoding/json"
+	"bufio"
 	"io"
 	"log"
 	"net"
@@ -18,17 +19,16 @@ import (
 	"context"
 	"github.com/Kimiblock/pecho"
 	"github.com/google/nftables"
-	"golang.org/x/sys/unix"
+	//"golang.org/x/sys/unix"
 	"github.com/coreos/go-systemd/v22/daemon"
 )
 
 const (
-	version		float32	=	0.1
+	version		float64	=	0.1
 )
 
 var (
 	connNft		*nftables.Conn
-	err		error
 	logChan		= pecho.MkChannel()
 	notifyChan 	= make(chan bool, 128)
 )
@@ -220,23 +220,40 @@ func setAppPerms(outperm appOutPerms, sandboxEng string) bool {
 		"debug",
 		"Got firewall rules for " + outperm.appID + " from " + sandboxEng,
 	}
-	var table = nftables.Table {
-		Name:	sandboxEng + "-" + outperm.appID,
-		Family:	unix.NFPROTO_INET,
+
+	cmd := exec.Command("nft", "list", "tables", "inet")
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		echo("warn", "Could not pipe stdout from nft: " + err.Error())
 	}
-	tableExt, errList := connNft.ListTableOfFamily(
-		sandboxEng + "-" + outperm.appID,
-		unix.NFPROTO_INET,
-	)
-	if errList != nil {
-		log.Println("Error listing table: " + errList.Error() + ", treating as non-existent")
-	} else if tableExt == nil {
-		log.Println("Got nil from ListTable")
-	} else {
-		connNft.DelTable(&table)
-		log.Println("Deleted previous table")
-		notifyChan <- false
+
+	scanner := bufio.NewScanner(stdout)
+
+	err = cmd.Start()
+	if err != nil {
+		echo("warn", "Could not execute nft: " + err.Error())
 	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		sliceOut := strings.Split(line, " ")
+		sliceLen := len(sliceOut)
+		if sliceOut[sliceLen - 1] == sandboxEng + "-" + outperm.appID {
+			echo("debug", "Found existing table")
+			cmdDel := exec.Command("nft", "delete", "table", sandboxEng + "-" + outperm.appID)
+			cmdDel.Stderr = os.Stderr
+			err = cmdDel.Run()
+			if err != nil {
+				echo("warn", "Could not delete previous table: " + err.Error())
+				return false
+			}
+			echo("debug", "Deleted previous table")
+			notifyChan <- false
+			break
+		}
+	}
+
 
 	nftFile := buildNftFile(sandboxEng + "-" + outperm.appID, outperm)
 	if len(nftFile) == 0 {
@@ -247,12 +264,14 @@ func setAppPerms(outperm appOutPerms, sandboxEng string) bool {
 	echo("debug", "Got generated rule: " + nftFile)
 
 
-	cmd := exec.Command("nft", "-c", "-f")
+	cmd = exec.Command("nft", "-c", "-f", "-")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		echo("warn", "Could not pipe stdin" + err.Error())
 		return false
 	}
+	cmd.Stderr = os.Stderr
+	cmd.Start()
 	_, err = io.WriteString(stdin, nftFile)
 	if err != nil {
 		echo("warn", "Could not write stdin: " + err.Error())
@@ -402,7 +421,7 @@ func signalListener (listener net.Listener) {
 		echo("warn", "You have changed the runtime directory. Downstream apps may not support this.")
 	}
 	sockPath := filepath.Join(runtimeDir, "control.sock")
-	listener, err = net.Listen("unix", sockPath)
+	listener, err := net.Listen("unix", sockPath)
 	if err != nil {
 		log.Fatalln("Could not listen UNIX socket: " + err.Error())
 		return
@@ -467,11 +486,7 @@ func main() {
 	go signalListener(unixListener)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 	go pecho.StartDaemon(logChan)
-	log.Println("Starting netsock", version, ", establishing connection to nftables")
-	connNft, err = nftables.New()
-	if err != nil {
-		log.Fatalln("Could not establish connection to nftables: " + err.Error())
-	}
+	echo("info", "Starting netsock " + strconv.FormatFloat(version, 'g', -1, 64))
 	echo("debug", "Established connection to nftables netlink socket")
 
 
