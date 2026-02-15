@@ -381,7 +381,13 @@ func signalListener (listener net.Listener) {
 	if runtimeDir != "/run/charcoal" {
 		echo("warn", "You have changed the runtime directory. Downstream apps may not support this.")
 	}
-	listener, err = net.Listen("unix", filepath.Join(runtimeDir, "control.sock"))
+	sockPath := filepath.Join(runtimeDir, "control.sock")
+	listener, err = net.Listen("unix", sockPath)
+	if err != nil {
+		log.Fatalln("Could not listen UNIX socket: " + err.Error())
+		return
+	}
+	err = os.Chmod(sockPath, 0722)
 	if err != nil {
 		log.Fatalln("Could not listen UNIX socket: " + err.Error())
 		return
