@@ -255,6 +255,7 @@ func setAppPerms(outperm appOutPerms, sandboxEng string) bool {
 			break
 		}
 	}
+	echo("debug", "Finished scanning existing tables")
 
 
 	nftFile := buildNftFile(sandboxEng + "-" + outperm.appID, outperm)
@@ -307,6 +308,17 @@ func setAppPerms(outperm appOutPerms, sandboxEng string) bool {
 		return false
 	} else {
 		echo("debug", "Rules test success")
+	}
+
+	cmd = exec.Command("nft", "-f", "-")
+	cmd.Stderr = os.Stderr
+
+	err = cmd.Run()
+	if err != nil {
+		echo("warn", "Could not apply nftables rules: " + err.Error())
+		return false
+	} else {
+		echo("info", "Firewall enabled on " + outperm.appID)
 	}
 
 
@@ -402,7 +414,7 @@ func addReqHandler (writer http.ResponseWriter, request *http.Request) {
 	if opRes != true {
 		echo("warn", "Could not engage firewall on " + info.appID)
 		resp.Success = false
-		resp.Log = "Could not engage firewall on " + info.appID
+		resp.Log = "Could not engage firewall on " + info.appID + ". Check daemon logging."
 	} else {
 		resp.Success = true
 		notifyChan <- true
