@@ -1,9 +1,9 @@
 [Unit]
 Description=Per-app firewall for Linux desktop
-Conflicts=shutdown.target
 RefuseManualStop=yes
+Before=graphical.target
 
-Documentation=man:auditd(8) https://github.com/linux-audit/audit-documentation
+Documentation=https://github.com/Kimiblock/charcoal
 
 [Service]
 # TODO: implement readiness notification
