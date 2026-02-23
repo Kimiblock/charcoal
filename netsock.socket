@@ -1,0 +1,13 @@
+[Socket]
+ListenStream=/run/netsock/control.sock
+SocketMode=0722
+Accept=no
+PassPIDFD=yes
+PassCredentials=yes
+Broadcast=yes
+PassSecurity=yes
+PassPacketInfo=yes
+Service=netsock.service
+
+[Install]
+WantedBy=sockets.target

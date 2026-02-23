@@ -25,6 +25,7 @@ import (
 
 	//"golang.org/x/sys/unix"
 	"github.com/coreos/go-systemd/v22/daemon"
+	"github.com/coreos/go-systemd/v22/activation"
 )
 
 const (
@@ -468,37 +469,42 @@ func unknownReqHandler (writer http.ResponseWriter, request *http.Request) {
 	sendResponse(writer, resp)
 }
 
-func shutdownWorker (shutdownChan chan os.Signal, listener net.Listener, block chan int) {
+func shutdownWorker (shutdownChan chan os.Signal, block chan int) {
 	sig := <- shutdownChan
 	echo("info", "Shutting down netsock on signal " + sig.String())
-	if listener != nil {
-		listener.Close()
-	}
 	block <- 1
 	//close(logChan)
 }
 
-func signalListener (listener net.Listener) {
-	runtimeDir := os.Getenv("RUNTIME_DIRECTORY")
-	if len(runtimeDir) == 0 {
-		echo("debug", "Could not read RUNTIME_DIRECTORY from environment")
-		runtimeDir = "/run/netsock"
-	}
+func signalListener () {
+	// runtimeDir := os.Getenv("RUNTIME_DIRECTORY")
+	// if len(runtimeDir) == 0 {
+	// 	echo("debug", "Could not read RUNTIME_DIRECTORY from environment")
+	// 	runtimeDir = "/run/netsock"
+	// }
 
-	if runtimeDir != "/run/netsock" {
-		echo("warn", "You have changed the runtime directory. Downstream apps may not support this.")
-	}
-	sockPath := filepath.Join(runtimeDir, "control.sock")
-	listener, err := net.Listen("unix", sockPath)
+	// if runtimeDir != "/run/netsock" {
+	// 	echo("warn", "You have changed the runtime directory. Downstream apps may not support this.")
+	// }
+	// sockPath := filepath.Join(runtimeDir, "control.sock")
+	// listener, err := net.Listen("unix", sockPath)
+	// if err != nil {
+	// 	log.Fatalln("Could not listen UNIX socket: " + err.Error())
+	// 	return
+	// }
+	// err = os.Chmod(sockPath, 0722)
+	// if err != nil {
+	// 	log.Fatalln("Could not listen UNIX socket: " + err.Error())
+	// 	return
+	// }
+
+	listeners, err := activation.Listeners()
 	if err != nil {
-		log.Fatalln("Could not listen UNIX socket: " + err.Error())
-		return
+		log.Fatalln("Could not listen on socket: " + err.Error())
+	} else if len(listeners) > 1 {
+		log.Fatalln("More than 1 listener, aborting...")
 	}
-	err = os.Chmod(sockPath, 0722)
-	if err != nil {
-		log.Fatalln("Could not listen UNIX socket: " + err.Error())
-		return
-	}
+	listener := listeners[0]
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", unknownReqHandler)
@@ -546,12 +552,11 @@ func signalListener (listener net.Listener) {
 }
 
 func main() {
-	var unixListener net.Listener
 	go notifier(notifyChan)
 	sigChan := make(chan os.Signal, 1)
 	blockerChan := make(chan int, 1)
-	go shutdownWorker(sigChan, unixListener, blockerChan)
-	go signalListener(unixListener)
+	go shutdownWorker(sigChan, blockerChan)
+	go signalListener()
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 	go pecho.StartDaemon(logChan)
 	echo("info", "Starting netsock " + strconv.FormatFloat(version, 'g', -1, 64))
