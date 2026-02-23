@@ -86,7 +86,7 @@ func notifier(notifierChan chan bool) {
 		if AppliedProcs > 1 {
 			trailingS = "s"
 		}
-		daemon.SdNotify(false, "STATUS=Filtering connections for " + strconv.Itoa(AppliedProcs) + "app" + trailingS)
+		daemon.SdNotify(false, "STATUS=Filtering connections for " + strconv.Itoa(AppliedProcs) + " app" + trailingS)
 	}
 }
 
