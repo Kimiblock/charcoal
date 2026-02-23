@@ -38,6 +38,7 @@ var (
 
 /* Special strings may be interpreted
 	private		10.0.0.0 - 10.255.255.255, 172.16.0.0 - 172.31.255.255, 192.168.0.0 - 192.168.255.255 and fd00::/8
+	loopback	127.0.0.0/8, ::1/128
 	other strings are resolved to IP addresses
 */
 type appOutPerms struct {
@@ -106,6 +107,7 @@ func buildNftFile (
 	v6Chan := make(chan string, 128)
 
 	var hasPrivate bool
+	var hasLoopback bool
 
 	for _, val := range outperm.denyIP {
 		wg.Go(func() {
@@ -118,6 +120,12 @@ func buildNftFile (
 				v4Chan <- "172.16.0.0/12"
 				v4Chan <- "192.168.0.0/16"
 				v6Chan <- "fd00::/8"
+			case "loopback":
+				if hasLoopback == true {
+					return
+				}
+				v4Chan <- "127.0.0.0/8"
+				v6Chan <- "::1/128"
 			default:
 				echo("debug", "Trying to resolve: " + val)
 				ipRes := net.ParseIP(val)
